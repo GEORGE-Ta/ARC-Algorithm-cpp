@@ -29,8 +29,8 @@ double test_cache_scenario(Cache& cache, const std::vector<int>& access_pattern)
 // Helper function to generate access pattern that shows ARC's advantages
 std::vector<int> generate_access_pattern(int size, int pattern_length) {
     std::vector<int> pattern;
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    // Use fixed seed for reproducible results
+    std::mt19937 gen(42);  // Fixed seed value
     
     // Generate a sequence that alternates between:
     // 1. Recently used items (favors LRU)
