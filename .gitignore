@@ -30,6 +30,12 @@
 *.exe
 *.out
 *.app
+test_cache
 
-# VS Code settings
+# IDE specific files
 .vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
