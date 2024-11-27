@@ -6,7 +6,7 @@
 #include <cstddef>
 
 template<typename K, typename V>
-class Cache {
+class Cache { //abstract class, it cannot be instantiated
 public:
     virtual ~Cache() = default;
     virtual void put(const K& key, const V& value) = 0;

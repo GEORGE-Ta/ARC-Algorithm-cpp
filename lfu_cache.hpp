@@ -8,11 +8,11 @@
 template<typename K, typename V>
 class LFUCache : public Cache<K, V> {
 private:
-    size_t capacity;
-    size_t minFreq;
+    size_t capacity; //the maximum elements in cache
+    size_t minFreq; //element with the minimum frequency
     std::unordered_map<K, std::pair<V, size_t>> keyToVal;  // key -> {value, freq}
     std::unordered_map<K, typename std::list<K>::iterator> keyToIter;  // key -> iterator in freqToKeys
-    std::map<size_t, std::list<K>> freqToKeys;  // freq -> list of keys
+    std::map<size_t, std::list<K>> freqToKeys;  // freq -> list of keys with the same frequency
 
     void increment(const K& key) {
         size_t freq = keyToVal[key].second;
@@ -44,10 +44,10 @@ public:
 
         if (keyToVal.size() >= capacity) {
             K evictKey = freqToKeys[minFreq].back();
-            freqToKeys[minFreq].pop_back();
+            freqToKeys[minFreq].pop_back(); //evict the minimum frequency element
             if (freqToKeys[minFreq].empty()) {
                 freqToKeys.erase(minFreq);
-            }
+            } //if the list of minFreq is empty
             keyToVal.erase(evictKey);
             keyToIter.erase(evictKey);
         }
