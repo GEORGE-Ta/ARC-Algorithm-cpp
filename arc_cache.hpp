@@ -49,8 +49,8 @@ private:
         else
         { // Delete the last element in t2(LRU in t2),and move it to MRU in B2
             K lru_key = t2.back();
-            LRU key in t2
-                t2.pop_back();
+            // LRU key in t2
+            t2.pop_back();
             V val = t2_map[lru_key].first;
             t2_map.erase(lru_key);
 
@@ -134,15 +134,18 @@ public:
         t1.push_front(key);
         t1_map[key] = {value, t1.begin()};*/
 
-        // Case 5: Super Cache miss 
-        if (t1.size() + b1.size() == capacity)
+        // Case 5: Super Cache miss
+        if (t1.size() + b1.size() >= capacity)
         {
             if (t1.size() < capacity)
             {
-                K lru_key = b1.back
-                                b1.pop_back();
-                b1_map.erase(lru_key);
-                repalce(false);
+                if (!b1.empty())
+                {
+                    K lru_key = b1.back();
+                    b1.pop_back();
+                    b1_map.erase(lru_key);
+                }
+                replace(false);
             }
             else
             {
@@ -150,24 +153,23 @@ public:
                 t1.pop_back();
                 t1_map.erase(lru_key);
             }
-            t1.push_front(key);
-            t1_map[key] = {value, t1.begin()};
         }
-        if (t1.size() + b1.size() < capacity)
+        else if (t1.size() + t2.size() + b1.size() + b2.size() >= capacity)
         {
-            if (t1.size() + t2.size() + b1.size() + b2.size() >= capacity)
+            if (t1.size() + t2.size() + b1.size() + b2.size() == 2 * capacity)
             {
-                if (t1.size() + t2.size() + b1.size() + b2.size() == 2 * capacity)
+                if (!b2.empty())
                 {
                     K lru_key = b2.back();
                     b2.pop_back();
                     b2_map.erase(lru_key);
-                } //删除 B2 中的最久未使用页面，
-                replace(false);
-                t1.push_front(key);
-                t1_map[key] = {value, t1.begin()};
+                }
             }
+            replace(false);
         }
+        // 默认情况下，将新键添加到 T1
+        t1.push_front(key);
+        t1_map[key] = {value, t1.begin()};
     }
 
     bool get(const K &key, V &value) override
