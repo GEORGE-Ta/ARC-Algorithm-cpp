@@ -1,3 +1,12 @@
+/**
+ * @file arc_cache.hpp
+ * @brief ARC（自适应替换缓存）的实现
+ * 
+ * ARC是一种自适应的缓存替换算法，它结合了LRU和LFU的优点。
+ * 通过维护两个LRU列表（T1和T2）和它们对应的影子列表（B1和B2），
+ * 动态调整策略以适应不同的访问模式。
+ */
+
 #ifndef ARC_CACHE_HPP
 #define ARC_CACHE_HPP
 
@@ -5,60 +14,66 @@
 #include <unordered_map>
 #include <list>
 
-template <typename K, typename V>
-class ARCache : public Cache<K, V>
-{
+/**
+ * @brief ARC缓存类
+ * @tparam K 键的类型
+ * @tparam V 值的类型
+ */
+template<typename K, typename V>
+class ARCache : public Cache<K, V> {
 private:
-    size_t capacity; // Maximum number of items in cache
-    size_t p;        // Target size for T1
-
-    // T1: Recent items
-    std::list<K> t1;                                                             // Most recently used items
-    std::unordered_map<K, std::pair<V, typename std::list<K>::iterator>> t1_map; // t1_map is a Hashing table. Key is K type, value is a std::pair type including a value V and a container pointing to the position in std::list<K>. Key to value and postion in t1
-
-    // T2: Frequent items
-    std::list<K> t2; // Most frequently used items
+    size_t capacity;  // 缓存总容量
+    size_t p;         // T1的目标大小，动态调整
+    
+    std::list<K> t1;  // 最近一次使用的页面列表
+    std::unordered_map<K, std::pair<V, typename std::list<K>::iterator>> t1_map;
+    
+    std::list<K> t2;  // 至少使用两次的页面列表
     std::unordered_map<K, std::pair<V, typename std::list<K>::iterator>> t2_map;
-
-    // B1: Ghost entries for recently evicted from T1
-    std::list<K> b1;
+    
+    std::list<K> b1;  // T1的影子列表，存储从T1移出的页面的"ghost"条目
     std::unordered_map<K, typename std::list<K>::iterator> b1_map;
-
-    // B2: Ghost entries for recently evicted from T2
-    std::list<K> b2;
+    
+    std::list<K> b2;  // T2的影子列表，存储从T2移出的页面的"ghost"条目
     std::unordered_map<K, typename std::list<K>::iterator> b2_map;
 
-    void replace(bool in_b2)
-    { // whether replacement is in b2 ；in_b2 表示导致缓存未命中的页面是否存在于 B2 中
-        if (!t1.empty() && ((t1.size() > p) || (in_b2 && t1.size() == p)))
-        {                          // Delete the LRU in T1 and move it to MRU in B1
-            K lru_key = t1.back(); // delete the last element in t1(LRU)
-            t1.pop_back();         // O(1),delete the element at the end;  erase is O(n)
+    /**
+     * @brief 替换策略的核心实现
+     * @param in_b2 是否在B2中找到了页面
+     * 
+     * 根据当前状态和参数决定从T1还是T2中移除页面
+     */
+    void replace(bool in_b2) {
+        if (!t1.empty() && ((t1.size() > p) || (in_b2 && t1.size() == p))) {
+            // 从T1移除
+            K lru_key = t1.back();
+            t1.pop_back();
             V val = t1_map[lru_key].first;
             t1_map.erase(lru_key);
-
-            b1.push_front(lru_key); // insert in the beginning of b1
+            
+            // 添加到B1
+            b1.push_front(lru_key);
             b1_map[lru_key] = b1.begin();
-
-            /*   if (b1.size() > capacity) { //if the size of b1 is larger than the size of cache
-                   K ghost_key = b1.back();
-                   b1.pop_back();
-                   b1_map.erase(ghost_key);
-               }*/
-        }
-        else
-        { // Delete the last element in t2(LRU in t2),and move it to MRU in B2
+            
+            // 如果B1太大，移除最旧的条目
+            if (b1.size() > capacity) {
+                K ghost_key = b1.back();
+                b1.pop_back();
+                b1_map.erase(ghost_key);
+            }
+        } else {
+            // 从T2移除
             K lru_key = t2.back();
-            // LRU key in t2
             t2.pop_back();
             V val = t2_map[lru_key].first;
             t2_map.erase(lru_key);
-
+            
+            // 添加到B2
             b2.push_front(lru_key);
             b2_map[lru_key] = b2.begin();
-
-            if (b2.size() > capacity)
-            {
+            
+            // 如果B2太大，移除最旧的条目
+            if (b2.size() > capacity) {
                 K ghost_key = b2.back();
                 b2.pop_back();
                 b2_map.erase(ghost_key);
@@ -67,47 +82,63 @@ private:
     }
 
 public:
-    explicit ARCache(size_t size) : capacity(size), p(0) {} // Constructor
+    /**
+     * @brief 构造函数
+     * @param size 缓存的最大容量
+     */
+    explicit ARCache(size_t size) : capacity(size), p(0) {}
 
-    void put(const K &key, const V &value) override
-    { // Put key-value pair in cache
-        // Case 1: Key exists in T1, Recent used items to be moved to front of T2
-        if (t1_map.count(key))
-        {                                      // check whether key is in t1_map
-            t1.erase(t1_map[key].second);      // delete element
-            t1_map.erase(key);                 // delete it in t1_map
-            t2.push_front(key);                // insert an item in the list t2
-            t2_map[key] = {value, t2.begin()}; // set the value of key and beginning postion in t2
+    /**
+     * @brief 插入或更新一个键值对
+     * @param key 键
+     * @param value 值
+     * 
+     * 根据页面的访问历史动态调整缓存策略
+     */
+    void put(const K& key, const V& value) override {
+        // Case 1: 键在T1中
+        if (t1_map.count(key)) {
+            t1.erase(t1_map[key].second);
+            t1_map.erase(key);
+            t2.push_front(key);
+            t2_map[key] = {value, t2.begin()};
             return;
         }
-
-        // Case 2: Key exists in T2
-        if (t2_map.count(key))
-        {
+        
+        // Case 2: 键在T2中
+        if (t2_map.count(key)) {
             t2.erase(t2_map[key].second);
             t2.push_front(key);
-            t2_map[key] = {value, t2.begin()}; // put them to the beginning of the T2
+            t2_map[key] = {value, t2.begin()};
             return;
         }
-
-        // Case 3: Key in B1(cache miss)
-        if (b1_map.count(key))
-        {
-            double delta = std::max(1.0, static_cast<double>(b2.size()) / static_cast<double>(std::max(size_t(1), b1.size()))); // the ratio of b2 and b1, make sure that it is larger than 1
-            p = std::min(capacity, static_cast<size_t>(p + delta));                                                             // make sure p is smaller than capacity
-            replace(false);                                                                                                     //?
+        
+        // Case 3: 键在B1中（页面曾经在T1中）
+        if (b1_map.count(key)) {
+            // 增加p，因为在B1中命中说明最近使用的页面更重要
+            size_t delta = 1;
+            if (b1.size() >= b2.size()) {
+                delta = b1.size() / b2.size();
+            }
+            p = std::min(capacity, p + delta);
+            
+            replace(false);
             b1.erase(b1_map[key]);
             b1_map.erase(key);
             t2.push_front(key);
             t2_map[key] = {value, t2.begin()};
             return;
         }
-
-        // Case 4: Key in B2 (cache miss)
-        if (b2_map.count(key))
-        {
-            double delta = std::max(1.0, static_cast<double>(b1.size()) / static_cast<double>(std::max(size_t(1), b2.size()))); // the ratio of b1 and b2
-            p = std::max(size_t(0), static_cast<size_t>(p >= delta ? p - delta : 0));                                           // if p>=delta, p=p-delta,otherwise p=0 ; change the size of p according to the b1 and b2
+        
+        // Case 4: 键在B2中（页面曾经在T2中）
+        if (b2_map.count(key)) {
+            // 减少p，因为在B2中命中说明频繁使用的页面更重要
+            size_t delta = 1;
+            if (b2.size() >= b1.size()) {
+                delta = b2.size() / b1.size();
+            }
+            p = std::max(size_t(0), p - delta);
+            
             replace(true);
             b2.erase(b2_map[key]);
             b2_map.erase(key);
@@ -115,95 +146,67 @@ public:
             t2_map[key] = {value, t2.begin()};
             return;
         }
-
-        // Case 5: Cache miss 调整！！
-        /*size_t total = t1.size() + t2.size();
+        
+        // Case 5: 键是新的
+        size_t total = t1.size() + t2.size();
         if (total >= capacity) {
             if (total == capacity) {
                 replace(false);
             }
-            else {
-                if (t1.size() < capacity) {
-                    K lru_key = t2.back();
-                    t2.pop_back();
-                    t2_map.erase(lru_key);
-                }
+            
+            if (t1.size() < capacity) {
+                t1.push_front(key);
+                t1_map[key] = {value, t1.begin()};
+            } else {
+                t2.push_front(key);
+                t2_map[key] = {value, t2.begin()};
             }
+        } else {
+            t1.push_front(key);
+            t1_map[key] = {value, t1.begin()};
         }
-
-        t1.push_front(key);
-        t1_map[key] = {value, t1.begin()};*/
-
-        // Case 5: Super Cache miss
-        if (t1.size() + b1.size() >= capacity)
-        {
-            if (t1.size() < capacity)
-            {
-                if (!b1.empty())
-                {
-                    K lru_key = b1.back();
-                    b1.pop_back();
-                    b1_map.erase(lru_key);
-                }
-                replace(false);
-            }
-            else
-            {
-                K lru_key = t1.back();
-                t1.pop_back();
-                t1_map.erase(lru_key);
-            }
-        }
-        else if (t1.size() + t2.size() + b1.size() + b2.size() >= capacity)
-        {
-            if (t1.size() + t2.size() + b1.size() + b2.size() == 2 * capacity)
-            {
-                if (!b2.empty())
-                {
-                    K lru_key = b2.back();
-                    b2.pop_back();
-                    b2_map.erase(lru_key);
-                }
-            }
-            replace(false);
-        }
-        // 默认情况下，将新键添加到 T1
-        t1.push_front(key);
-        t1_map[key] = {value, t1.begin()};
     }
 
-    bool get(const K &key, V &value) override
-    {
-        // Case 1: Key in T1
-        if (t1_map.count(key))
-        {
+    /**
+     * @brief 获取键对应的值
+     * @param key 要查找的键
+     * @param value 如果找到，值将被存储在这里
+     * @return 如果找到键返回true，否则返回false
+     */
+    bool get(const K& key, V& value) override {
+        // 检查T1
+        if (t1_map.count(key)) {
             value = t1_map[key].first;
-            K k = key;
-            V v = value;
-            put(k, v); // This will move it to T2
+            t1.erase(t1_map[key].second);
+            t1_map.erase(key);
+            t2.push_front(key);
+            t2_map[key] = {value, t2.begin()};
             return true;
         }
-
-        // Case 2: Key in T2
-        if (t2_map.count(key))
-        {
+        
+        // 检查T2
+        if (t2_map.count(key)) {
             value = t2_map[key].first;
-            K k = key;
-            V v = value;
-            put(k, v); // This will move it to front of T2
+            t2.erase(t2_map[key].second);
+            t2.push_front(key);
+            t2_map[key] = {value, t2.begin()};
             return true;
-        } // if we find key, return false
-
-        return false; // if we don't find key, return false
+        }
+        
+        return false;
     }
 
-    size_t size() const override
-    {
+    /**
+     * @brief 获取当前缓存中的项目数量
+     */
+    size_t size() const override {
         return t1.size() + t2.size();
     }
 
-    void clear() override
-    {
+    /**
+     * @brief 清空缓存
+     */
+    void clear() override {
         t1.clear();
         t2.clear();
         b1.clear();
