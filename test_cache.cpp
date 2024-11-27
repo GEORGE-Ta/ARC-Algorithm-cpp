@@ -1,11 +1,3 @@
-/**
- * @file test_cache.cpp
- * @brief 缓存性能测试程序
- * 
- * 这个程序测试并比较了LRU、LFU和ARC三种缓存策略的性能。
- * 通过生成特定的访问模式来展示各种缓存策略的优缺点。
- */
-
 #include "arc_cache.hpp"
 #include "lru_cache.hpp"
 #include "lfu_cache.hpp"
@@ -15,12 +7,7 @@
 #include <random>
 #include <iomanip>
 
-/**
- * @brief 测试缓存的命中率
- * @param cache 要测试的缓存对象
- * @param access_pattern 访问模式序列
- * @return 缓存命中率（命中次数/总访问次数）
- */
+// Helper function to measure cache hit rate
 template<typename Cache>
 double test_cache_scenario(Cache& cache, const std::vector<int>& access_pattern) {
     int hits = 0;
@@ -29,9 +16,9 @@ double test_cache_scenario(Cache& cache, const std::vector<int>& access_pattern)
     for (int key : access_pattern) {
         int value;
         if (cache.get(key, value)) {
-            hits++;  // 缓存命中
+            hits++;
         } else {
-            cache.put(key, key);  // 缓存未命中，插入新值
+            cache.put(key, key);
         }
         total++;
     }
@@ -39,81 +26,146 @@ double test_cache_scenario(Cache& cache, const std::vector<int>& access_pattern)
     return static_cast<double>(hits) / total;
 }
 
-/**
- * @brief 生成测试用的访问模式
- * @param size 可能的键的范围（0到size-1）
- * @param pattern_length 要生成的访问序列长度
- * @return 访问序列
- * 
- * 生成的访问模式包含三种类型的访问：
- * 1. 频繁访问的项（有利于LFU）
- * 2. 最近访问的项（有利于LRU）
- * 3. 随机访问的项（测试适应性）
- */
-std::vector<int> generate_access_pattern(int size, int pattern_length) {
+// Helper function to generate access pattern that shows ARC's advantages
+// Random access pattern
+std::vector<int> generate_random_access_pattern(int data_range, int pattern_length, int seed = 42) {
     std::vector<int> pattern;
-    std::mt19937 gen(42);  // 使用固定的种子以保证结果可重现
-    
-    // 生成频繁访问的项（占用1/4的键空间）
-    std::vector<int> frequent_items;
-    for (int i = 0; i < size/4; i++) {
-        frequent_items.push_back(i);
-    }
-    
-    // 生成最近访问的项（占用1/4的键空间）
-    std::vector<int> recent_items;
-    for (int i = size/2; i < size/2 + size/4; i++) {
-        recent_items.push_back(i);
-    }
-    
-    // 用于生成随机访问
-    std::uniform_int_distribution<> random_dist(0, size-1);
-    std::uniform_int_distribution<> pattern_dist(0, 2);
-    
-    // 生成访问序列
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<> dist(0, data_range - 1);
     for (int i = 0; i < pattern_length; i++) {
-        int pattern_type = pattern_dist(gen);
-        
-        if (pattern_type == 0) {
-            // 添加频繁访问的项
-            pattern.push_back(frequent_items[i % frequent_items.size()]);
-        }
-        else if (pattern_type == 1) {
-            // 添加最近访问的项
-            pattern.push_back(recent_items[i % recent_items.size()]);
-        }
-        else {
-            // 添加随机访问的项
-            pattern.push_back(random_dist(gen));
-        }
+        pattern.push_back(dist(gen));
     }
-    
     return pattern;
 }
 
+// Locality access pattern (sequential access with some randomness)
+std::vector<int> generate_locality_access_pattern(int data_range, int pattern_length, int locality_size, int seed = 42) {
+    std::vector<int> pattern;
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<> dist(0, data_range - locality_size);
+    std::uniform_int_distribution<> local_dist(0, locality_size - 1);
+    for (int i = 0; i < pattern_length; i++) {
+        int base = dist(gen);
+        pattern.push_back(base + local_dist(gen));
+    }
+    return pattern;
+}
+
+// Periodic access pattern
+std::vector<int> generate_periodic_access_pattern(int data_range, int pattern_length, int period, int seed = 42) {
+    std::vector<int> pattern;
+    for (int i = 0; i < pattern_length; i++) {
+        pattern.push_back((i % period) % data_range);
+    }
+    return pattern;
+}
+
+// Zipfian access pattern
+std::vector<int> generate_zipfian_access_pattern(int data_range, int pattern_length, double skew, int seed = 42) {
+    std::vector<int> pattern;
+    std::mt19937 gen(seed);
+    double denom = 0.0;
+    for (int i = 1; i <= data_range; i++) {
+        denom += 1.0 / pow(i, skew);
+    }
+    std::vector<double> probabilities(data_range + 1, 0.0);
+    probabilities[0] = 0.0;
+    for (int i = 1; i <= data_range; i++) {
+        probabilities[i] = probabilities[i - 1] + (1.0 / pow(i, skew)) / denom;
+    }
+    std::uniform_real_distribution<> dist(0.0, 1.0);
+    for (int i = 0; i < pattern_length; i++) {
+        double p = dist(gen);
+        int low = 1, high = data_range;
+        while (low < high) {
+            int mid = (low + high) / 2;
+            if (probabilities[mid] >= p)
+                high = mid;
+            else
+                low = mid + 1;
+        }
+        pattern.push_back(low - 1); // 索引从 0 开始
+    }
+    return pattern;
+}
 int main() {
-    // 测试参数设置
-    const int cache_size = 100;        // 缓存大小
-    const int key_space = 1000;        // 可能的键的范围
-    const int pattern_length = 10000;  // 访问序列长度
+    const int DATA_RANGE = 1000;
+    const int PATTERN_LENGTH = 10000;
+    const std::vector<int> CACHE_SIZES = {50, 100, 200}; // 不同的缓存容量
+    const std::vector<int> LOCALITY_SIZES = {10, 50, 100}; // 对于局部性访问模式
+    const std::vector<int> PERIODS = {100, 200, 500}; // 对于周期性访问模式
+    const std::vector<double> ZIPF_SKEWS = {0.5, 1.0, 1.5}; // 对于 Zipf 分布
     
-    // 生成测试用的访问模式
-    std::vector<int> access_pattern = generate_access_pattern(key_space, pattern_length);
+    // 定义缓存策略名称和对应的构造函数
+    std::map<std::string, std::function<Cache<int, int>*(int)>> cache_factories = {
+        {"ARC", [](int size) { return new ARCache<int, int>(size); }},
+        {"LRU", [](int size) { return new LRUCache<int, int>(size); }},
+        {"LFU", [](int size) { return new LFUCache<int, int>(size); }}
+    };
     
-    // 创建三种不同的缓存
-    LRUCache<int, int> lru_cache(cache_size);
-    LFUCache<int, int> lfu_cache(cache_size);
-    ARCache<int, int> arc_cache(cache_size);
+    // 存储实验结果
+    struct Result {
+        std::string pattern_type;
+        int cache_size;
+        std::string cache_type;
+        double hit_rate;
+    };
+    std::vector<Result> results;
     
-    // 测试并输出结果
+    // 运行实验
+    for (const auto& cache_size : CACHE_SIZES) {
+        // 测试随机访问模式
+        {
+            std::vector<int> access_pattern = generate_random_access_pattern(DATA_RANGE, PATTERN_LENGTH);
+            for (const auto& cache_pair : cache_factories) {
+                Cache<int, int>* cache = cache_pair.second(cache_size);
+                double hit_rate = test_cache_scenario(*cache, access_pattern);
+                results.push_back({"Random", cache_size, cache_pair.first, hit_rate});
+                delete cache;
+            }
+        }
+        // 测试局部性访问模式
+        for (const auto& locality_size : LOCALITY_SIZES) {
+            std::vector<int> access_pattern = generate_locality_access_pattern(DATA_RANGE, PATTERN_LENGTH, locality_size);
+            for (const auto& cache_pair : cache_factories) {
+                Cache<int, int>* cache = cache_pair.second(cache_size);
+                double hit_rate = test_cache_scenario(*cache, access_pattern);
+                results.push_back({"Locality(" + std::to_string(locality_size) + ")", cache_size, cache_pair.first, hit_rate});
+                delete cache;
+            }
+        }
+        // 测试周期性访问模式
+        for (const auto& period : PERIODS) {
+            std::vector<int> access_pattern = generate_periodic_access_pattern(DATA_RANGE, PATTERN_LENGTH, period);
+            for (const auto& cache_pair : cache_factories) {
+                Cache<int, int>* cache = cache_pair.second(cache_size);
+                double hit_rate = test_cache_scenario(*cache, access_pattern);
+                results.push_back({"Periodic(" + std::to_string(period) + ")", cache_size, cache_pair.first, hit_rate});
+                delete cache;
+            }
+        }
+        // 测试 Zipf 分布访问模式
+        for (const auto& skew : ZIPF_SKEWS) {
+            std::vector<int> access_pattern = generate_zipfian_access_pattern(DATA_RANGE, PATTERN_LENGTH, skew);
+            for (const auto& cache_pair : cache_factories) {
+                Cache<int, int>* cache = cache_pair.second(cache_size);
+                double hit_rate = test_cache_scenario(*cache, access_pattern);
+                results.push_back({"Zipf(" + std::to_string(skew) + ")", cache_size, cache_pair.first, hit_rate});
+                delete cache;
+            }
+        }
+    }
+    
+    // 输出结果
     std::cout << std::fixed << std::setprecision(4);
-    std::cout << "缓存大小: " << cache_size << std::endl;
-    std::cout << "键空间大小: " << key_space << std::endl;
-    std::cout << "访问序列长度: " << pattern_length << std::endl;
-    std::cout << "\n各种缓存策略的命中率：" << std::endl;
-    std::cout << "LRU: " << test_cache_scenario(lru_cache, access_pattern) << std::endl;
-    std::cout << "LFU: " << test_cache_scenario(lfu_cache, access_pattern) << std::endl;
-    std::cout << "ARC: " << test_cache_scenario(arc_cache, access_pattern) << std::endl;
+    std::cout << "Cache Performance Results:\n";
+    std::cout << "Pattern\t\tCache Size\tCache Type\tHit Rate (%)\n";
+    for (const auto& result : results) {
+        std::cout << result.pattern_type << "\t"
+                  << result.cache_size << "\t\t"
+                  << result.cache_type << "\t\t"
+                  << result.hit_rate * 100 << "%\n";
+    }
     
     return 0;
 }
